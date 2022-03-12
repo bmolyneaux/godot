@@ -3184,10 +3184,6 @@ void DisplayServerWindows::_process_key_events() {
 						k->set_ctrl_pressed(false);
 					}
 
-					if (k->get_unicode() < 32) {
-						k->set_unicode(0);
-					}
-
 					Input::get_singleton()->parse_input_event(k);
 				} else {
 					// Do nothing.
@@ -3239,10 +3235,6 @@ void DisplayServerWindows::_process_key_events() {
 				if (k->get_unicode() && gr_mem) {
 					k->set_alt_pressed(false);
 					k->set_ctrl_pressed(false);
-				}
-
-				if (k->get_unicode() < 32) {
-					k->set_unicode(0);
 				}
 
 				k->set_echo((ke.uMsg == WM_KEYDOWN && (ke.lParam & (1 << 30))));
