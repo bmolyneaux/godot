@@ -489,6 +489,7 @@ public:
 
 	void get_breakpoints(List<String> *p_breakpoints);
 
+	List<RES> get_unsaved_scripts();
 	void save_current_script();
 	void save_all_scripts();
 

@@ -38,6 +38,7 @@
 #include "editor/editor_run.h"
 #include "editor/inspector_dock.h"
 #include "editor/property_editor.h"
+#include "editor/save_confirmation_dialog.h"
 
 typedef void (*EditorNodeInitCallback)();
 typedef void (*EditorPluginInitializeCallback)();
@@ -154,6 +155,7 @@ private:
 		FILE_CLOSE_ALL_AND_QUIT,
 		FILE_CLOSE_ALL_AND_RUN_PROJECT_MANAGER,
 		FILE_CLOSE_ALL_AND_RELOAD_CURRENT_PROJECT,
+
 		FILE_QUIT,
 		FILE_EXTERNAL_OPEN_SCENE,
 		EDIT_UNDO,
@@ -310,6 +312,7 @@ private:
 	ConfirmationDialog *save_confirmation;
 	ConfirmationDialog *import_confirmation;
 	ConfirmationDialog *pick_main_scene;
+	SaveConfirmationDialog *save_confirmation2;
 	Button *select_current_scene_button;
 	AcceptDialog *accept;
 	AcceptDialog *save_accept;
@@ -504,8 +507,10 @@ private:
 	bool _validate_scene_recursive(const String &p_filename, Node *p_node);
 	void _save_scene(String p_file, int idx = -1);
 	void _save_all_scenes();
-	int _next_unsaved_scene(bool p_valid_filename, int p_start = 0);
+	int _next_unsaved_scene(bool p_no_filename, int p_start = 0);
 	void _discard_changes(const String &p_str = String());
+
+	void _resource_file_activated(String file_path);
 
 	void _inherit_request(String p_file);
 	void _instantiate_request(const Vector<String> &p_files);

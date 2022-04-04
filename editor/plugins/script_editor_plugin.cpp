@@ -2495,6 +2495,31 @@ void ScriptEditor::save_current_script() {
 	}
 }
 
+List<RES> ScriptEditor::get_unsaved_scripts()
+{
+	List<RES> unsaved_scripts;
+
+	for (int i = 0; i < tab_container->get_tab_count(); i++) {
+		ScriptEditorBase *se = Object::cast_to<ScriptEditorBase>(tab_container->get_tab_control(i));
+		if (!se) {
+			continue;
+		}
+
+		if (!se->is_unsaved()) {
+			continue;
+		}
+
+		RES edited_res = se->get_edited_resource();
+		
+		// TODO(#4299): Not sure if I need to check built-in scripts as well or if they will be handled by the scenes
+		if (edited_res != nullptr && !edited_res->is_built_in()) {
+			unsaved_scripts.push_back(edited_res);
+		}
+	}
+
+	return unsaved_scripts;
+}
+
 void ScriptEditor::save_all_scripts() {
 	Vector<String> scenes_to_save;
 

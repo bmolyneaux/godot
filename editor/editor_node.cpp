@@ -1656,6 +1656,7 @@ static bool _find_edited_resources(const Ref<Resource> &p_resource, Set<Ref<Reso
 }
 
 int EditorNode::_save_external_resources() {
+	// TODO(#4299) The appears to be where scenes save resource files.
 	// save external resources and its subresources if any was modified
 
 	int flg = 0;
@@ -1892,9 +1893,9 @@ void EditorNode::_dialog_action(String p_file) {
 			}
 		} break;
 		case FILE_CLOSE:
-		case FILE_CLOSE_ALL_AND_QUIT:
-		case FILE_CLOSE_ALL_AND_RUN_PROJECT_MANAGER:
-		case FILE_CLOSE_ALL_AND_RELOAD_CURRENT_PROJECT:
+		case FILE_QUIT:
+		case RUN_PROJECT_MANAGER:
+		case RELOAD_CURRENT_PROJECT:
 		case SCENE_TAB_CLOSE:
 		case FILE_SAVE_SCENE:
 		case FILE_SAVE_AS_SCENE: {
@@ -2533,35 +2534,127 @@ void EditorNode::_menu_option_confirm(int p_option, bool p_confirmed) {
 		case FILE_CLOSE: {
 			_scene_tab_closed(editor_data.get_edited_scene());
 		} break;
-		case FILE_CLOSE_ALL_AND_QUIT:
-		case FILE_CLOSE_ALL_AND_RUN_PROJECT_MANAGER:
-		case FILE_CLOSE_ALL_AND_RELOAD_CURRENT_PROJECT: {
-			if (!p_confirmed) {
-				tab_closing = _next_unsaved_scene(false);
-				_scene_tab_changed(tab_closing);
+		case FILE_QUIT:
+		case RUN_PROJECT_MANAGER:
+		case RELOAD_CURRENT_PROJECT: {
+			// TODO(#4299): Remove "interface/editor/save_each_scene_on_quit"
+			// TODO(#4299): Special case not previously saved scenes
+			// TODO(#4299): Figure out if former !p_confirmed check is necessary here
 
-				if (unsaved_cache || p_option == FILE_CLOSE_ALL_AND_QUIT || p_option == FILE_CLOSE_ALL_AND_RUN_PROJECT_MANAGER || p_option == FILE_CLOSE_ALL_AND_RELOAD_CURRENT_PROJECT) {
+			// TODO(#4299): Check scripts and resources for unsaved changes in addition to scenes
+			bool unsaved_changes = _next_unsaved_scene(false) != -1;
+			if (!unsaved_changes) {
+				switch(current_option) {
+					case FILE_QUIT: {
+						_menu_option_confirm(RUN_STOP, true);
+						_exit_editor(EXIT_SUCCESS);
+
+					} break;
+					case RUN_PROJECT_MANAGER: {
+						_menu_option_confirm(RUN_STOP, true);
+						_exit_editor(EXIT_SUCCESS);
+						String exec = OS::get_singleton()->get_executable_path();
+
+						List<String> args;
+						args.push_back("--path");
+						args.push_back(exec.get_base_dir());
+						args.push_back("--project-manager");
+
+						Error err = OS::get_singleton()->create_instance(args);
+						ERR_FAIL_COND(err);
+					} break;
+					case RELOAD_CURRENT_PROJECT: {
+						restart_editor();
+					} break;
+				}
+				break;
+			} else {
+				// TODO(#4299): Also for new unsaved scenes. Currently this only lists previously saved scenes
+
+				// TODO(#4299): Can use this for the save confirmation dialog to change scenes
+				//_scene_tab_changed(tab_closing);
+				// For scripts: _editor_select(EDITOR_SCRIPT);
+				// Or perhaps: if (textfile_extensions.has(p_resource.get_extension())) res = ScriptEditor::get_singleton()->open_file(p_resource);
+				//ScriptEditor::get_singleton()->open_file(unsaved_scripts[0]->get_path());
+				//_editor_select(EDITOR_SCRIPT);
+
+				// First handle the pathless scenes
+				int i = _next_unsaved_scene(true, 0);
+				// TODO(#4299): Make sure that tab_closing is reset
+				if (i == tab_closing) {
+					// TODO(#4299): Need FILE_SAVE_SCENE to get back to this flow
+					// This gets stuck in the decision to save
+					// How does it trigger saving normally? Should aim to do it that way instead
+					// The current system relies on fallthrough to FILE_SAVE_AS_SCENE
+					_menu_option_confirm(FILE_SAVE_SCENE, false);
+					break;
+				}
+				if (i != -1) {
+					tab_closing = i;
+					_scene_tab_changed(tab_closing);
+
 					Node *scene_root = editor_data.get_edited_scene_root(tab_closing);
 					if (scene_root) {
 						String scene_filename = scene_root->get_scene_file_path();
-						if (p_option == FILE_CLOSE_ALL_AND_RELOAD_CURRENT_PROJECT) {
+						if (p_option == RELOAD_CURRENT_PROJECT) {
 							save_confirmation->get_ok_button()->set_text(TTR("Save & Reload"));
-							save_confirmation->set_text(vformat(TTR("Save changes to '%s' before reloading?"), !scene_filename.is_empty() ? scene_filename : "unsaved scene"));
+							save_confirmation->set_text(vformat(TTR("Save this scene before reloading?")));
 						} else {
 							save_confirmation->get_ok_button()->set_text(TTR("Save & Quit"));
-							save_confirmation->set_text(vformat(TTR("Save changes to '%s' before closing?"), !scene_filename.is_empty() ? scene_filename : "unsaved scene"));
+							save_confirmation->set_text(vformat(TTR("Save this scene before closing?")));
 						}
 						save_confirmation->popup_centered();
 						break;
 					}
 				}
-			}
-			if (!editor_data.get_edited_scene_root(tab_closing)) {
-				// empty tab
-				_scene_tab_closed(tab_closing);
-				break;
+
+				// Next bundle up all other changes
+				List<SaveConfirmationDialog::ResourceFile> resources;
+					
+				i = _next_unsaved_scene(false, 0);
+				while (i != -1) {
+					SaveConfirmationDialog::ResourceFile rf;
+					rf.file_path = editor_data.get_edited_scene_root(i)->get_scene_file_path();
+					rf.icon = get_object_icon(editor_data.get_edited_scene_root(i));
+					resources.push_back(rf);
+					i = _next_unsaved_scene(false, ++i);
+				}
+
+				List<Ref<Resource>> unsaved_scripts = ScriptEditor::get_singleton()->get_unsaved_scripts();
+				for (const Ref<Resource> &script : unsaved_scripts)
+				{
+					SaveConfirmationDialog::ResourceFile rf;
+					rf.file_path = script->get_path();
+					rf.icon = get_object_icon(script.ptr());
+					resources.push_back(rf);
+				}
+
+				// TODO(#4299): Is there a need to check subresources recursively? It doesn't seem so. If so use _find_edited_resources()
+				List<Ref<Resource>> cached;
+				ResourceCache::get_cached_resources(&cached);
+				for (const Ref<Resource> &res : cached) {
+					// TODO(#4299): is_edited() returns true when the parent of an edited resource file is edited
+					// Maybe need to change the engine to not consider the parent as edited when a file is edited. May not be feasible because it needs to work when the child is not a file. Needs investigation.
+					if (!res->get_path().is_resource_file() || !res->is_edited()) {
+						continue;
+					}
+					SaveConfirmationDialog::ResourceFile rf;
+					rf.file_path = res->get_path();
+					rf.icon = get_object_icon(res.ptr());
+					resources.push_back(rf);
+				}
+
+				save_confirmation2->confirm_resources(resources);
 			}
 
+			DisplayServer::get_singleton()->window_request_attention();
+			break;
+
+			/*if (_next_unsaved_scene(false) != -1) {
+				_save_all_scenes();
+			}
+			_discard_changes();*/
+			
 			[[fallthrough]];
 		}
 		case SCENE_TAB_CLOSE:
@@ -2836,50 +2929,6 @@ void EditorNode::_menu_option_confirm(int p_option, bool p_confirmed) {
 		case FILE_EXPLORE_ANDROID_BUILD_TEMPLATES: {
 			OS::get_singleton()->shell_open("file://" + ProjectSettings::get_singleton()->get_resource_path().plus_file("android"));
 		} break;
-		case FILE_QUIT:
-		case RUN_PROJECT_MANAGER:
-		case RELOAD_CURRENT_PROJECT: {
-			if (!p_confirmed) {
-				bool save_each = EDITOR_GET("interface/editor/save_each_scene_on_quit");
-				if (_next_unsaved_scene(!save_each) == -1) {
-					_discard_changes();
-					break;
-				} else {
-					if (save_each) {
-						if (p_option == RELOAD_CURRENT_PROJECT) {
-							_menu_option_confirm(FILE_CLOSE_ALL_AND_RELOAD_CURRENT_PROJECT, false);
-						} else if (p_option == FILE_QUIT) {
-							_menu_option_confirm(FILE_CLOSE_ALL_AND_QUIT, false);
-						} else {
-							_menu_option_confirm(FILE_CLOSE_ALL_AND_RUN_PROJECT_MANAGER, false);
-						}
-					} else {
-						String unsaved_scenes;
-						int i = _next_unsaved_scene(true, 0);
-						while (i != -1) {
-							unsaved_scenes += "\n            " + editor_data.get_edited_scene_root(i)->get_scene_file_path();
-							i = _next_unsaved_scene(true, ++i);
-						}
-						if (p_option == RELOAD_CURRENT_PROJECT) {
-							save_confirmation->get_ok_button()->set_text(TTR("Save & Reload"));
-							save_confirmation->set_text(TTR("Save changes to the following scene(s) before reloading?") + unsaved_scenes);
-						} else {
-							save_confirmation->get_ok_button()->set_text(TTR("Save & Quit"));
-							save_confirmation->set_text((p_option == FILE_QUIT ? TTR("Save changes to the following scene(s) before quitting?") : TTR("Save changes to the following scene(s) before opening Project Manager?")) + unsaved_scenes);
-						}
-						save_confirmation->popup_centered();
-					}
-				}
-
-				DisplayServer::get_singleton()->window_request_attention();
-				break;
-			}
-
-			if (_next_unsaved_scene(true) != -1) {
-				_save_all_scenes();
-			}
-			_discard_changes();
-		} break;
 		case SETTINGS_UPDATE_CONTINUOUSLY: {
 			EditorSettings::get_singleton()->set("interface/editor/update_continuously", true);
 			_update_update_spinner();
@@ -3030,7 +3079,7 @@ void EditorNode::_tool_menu_option(int p_idx) {
 	}
 }
 
-int EditorNode::_next_unsaved_scene(bool p_valid_filename, int p_start) {
+int EditorNode::_next_unsaved_scene(bool p_no_filename, int p_start) {
 	for (int i = p_start; i < editor_data.get_edited_scene_count(); i++) {
 		if (!editor_data.get_edited_scene_root(i)) {
 			continue;
@@ -3039,7 +3088,7 @@ int EditorNode::_next_unsaved_scene(bool p_valid_filename, int p_start) {
 		bool unsaved = (i == current) ? saved_version != editor_data.get_undo_redo().get_version() : editor_data.get_scene_version(i) != 0;
 		if (unsaved) {
 			String scene_filename = editor_data.get_edited_scene_root(i)->get_scene_file_path();
-			if (p_valid_filename && scene_filename.length() == 0) {
+			if (p_no_filename && !scene_filename.is_empty()) {
 				continue;
 			}
 			return i;
@@ -3061,9 +3110,9 @@ void EditorNode::_exit_editor(int p_exit_code) {
 
 void EditorNode::_discard_changes(const String &p_str) {
 	switch (current_option) {
-		case FILE_CLOSE_ALL_AND_QUIT:
-		case FILE_CLOSE_ALL_AND_RUN_PROJECT_MANAGER:
-		case FILE_CLOSE_ALL_AND_RELOAD_CURRENT_PROJECT:
+		case FILE_QUIT:
+		case RUN_PROJECT_MANAGER:
+		case RELOAD_CURRENT_PROJECT:
 		case FILE_CLOSE:
 		case FILE_CLOSE_OTHERS:
 		case FILE_CLOSE_RIGHT:
@@ -3080,19 +3129,13 @@ void EditorNode::_discard_changes(const String &p_str) {
 			_remove_scene(tab_closing);
 			_update_scene_tabs();
 
-			if (current_option == FILE_CLOSE_ALL_AND_QUIT || current_option == FILE_CLOSE_ALL_AND_RUN_PROJECT_MANAGER || current_option == FILE_CLOSE_ALL_AND_RELOAD_CURRENT_PROJECT) {
+			if (current_option == FILE_QUIT || current_option == RUN_PROJECT_MANAGER || current_option == RELOAD_CURRENT_PROJECT) {
 				// If restore tabs is enabled, reopen the scene that has just been closed, so it's remembered properly.
 				if (bool(EDITOR_GET("interface/scene_tabs/restore_scenes_on_load"))) {
 					_menu_option_confirm(FILE_OPEN_PREV, true);
 				}
+				// TODO(#4299): Check for unsaved resources as well here
 				if (_next_unsaved_scene(false) == -1) {
-					if (current_option == FILE_CLOSE_ALL_AND_RELOAD_CURRENT_PROJECT) {
-						current_option = RELOAD_CURRENT_PROJECT;
-					} else if (current_option == FILE_CLOSE_ALL_AND_QUIT) {
-						current_option = FILE_QUIT;
-					} else {
-						current_option = RUN_PROJECT_MANAGER;
-					}
 					_discard_changes();
 				} else {
 					_menu_option_confirm(current_option, false);
@@ -3110,27 +3153,6 @@ void EditorNode::_discard_changes(const String &p_str) {
 				current_option = -1;
 				save_confirmation->hide();
 			}
-		} break;
-		case FILE_QUIT: {
-			_menu_option_confirm(RUN_STOP, true);
-			_exit_editor(EXIT_SUCCESS);
-
-		} break;
-		case RUN_PROJECT_MANAGER: {
-			_menu_option_confirm(RUN_STOP, true);
-			_exit_editor(EXIT_SUCCESS);
-			String exec = OS::get_singleton()->get_executable_path();
-
-			List<String> args;
-			args.push_back("--path");
-			args.push_back(exec.get_base_dir());
-			args.push_back("--project-manager");
-
-			Error err = OS::get_singleton()->create_instance(args);
-			ERR_FAIL_COND(err);
-		} break;
-		case RELOAD_CURRENT_PROJECT: {
-			restart_editor();
 		} break;
 	}
 }
@@ -3841,6 +3863,19 @@ void EditorNode::_quick_opened() {
 		} else {
 			load_resource(res_path);
 		}
+	}
+}
+
+void EditorNode::_resource_file_activated(String file_path) {
+	List<String> scene_extensions;
+	ResourceLoader::get_recognized_extensions_for_type("PackedScene", &scene_extensions);
+
+	if (scene_extensions.find(file_path.get_extension())) {
+		// TODO(#4299): Don't know whether to switch to 2D or 3D
+		_editor_select(EDITOR_2D);
+		open_request(file_path);
+	} else {
+		load_resource(file_path);
 	}
 }
 
@@ -6876,6 +6911,13 @@ EditorNode::EditorNode() {
 	gui_base->add_child(save_confirmation);
 	save_confirmation->connect("confirmed", callable_mp(this, &EditorNode::_menu_confirm_current));
 	save_confirmation->connect("custom_action", callable_mp(this, &EditorNode::_discard_changes));
+
+	save_confirmation2 = memnew(SaveConfirmationDialog);
+	gui_base->add_child(save_confirmation2);
+	// TODO(#4299): Connect cancel, save, don't save buttons
+	save_confirmation2->connect("resource_file_activated", callable_mp(this, &EditorNode::_resource_file_activated));
+	//save_confirmation2->connect("save_and_close", callable_mp(this, &EditorNode::_save_files_and_close));
+	save_confirmation2->connect("dont_save", callable_mp(this, &EditorNode::_discard_changes));
 
 	custom_build_manage_templates = memnew(ConfirmationDialog);
 	custom_build_manage_templates->set_text(TTR("Android build template is missing, please install relevant templates."));
