@@ -161,7 +161,7 @@ Size2 SaveConfirmationDialog::_get_contents_minimum_size() const {
 void SaveConfirmationDialog::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("save_and_close"));
 	ADD_SIGNAL(MethodInfo("cancel"));
-	ADD_SIGNAL(MethodInfo("dont_save"));
+	ADD_SIGNAL(MethodInfo("dont_save", PropertyInfo(Variant::STRING_NAME, "action")));
 	ADD_SIGNAL(MethodInfo("resource_file_activated", PropertyInfo(Variant::STRING_NAME, "file_path")));
 }
 
@@ -171,6 +171,16 @@ void SaveConfirmationDialog::confirm_resources(const List<ResourceFile>& resourc
 		resource_list->add_item(resource.file_path, resource.icon);
 	}
 	popup_centered();
+
+	_resources = resources;
+}
+
+List<SaveConfirmationDialog::ResourceFile> SaveConfirmationDialog::get_selected_resources() {
+	List<ResourceFile> resources;
+	for (int i : resource_list->get_selected_items()) {
+		resources.push_back(_resources[i]);
+	}
+	return resources;
 }
 
 SaveConfirmationDialog::SaveConfirmationDialog() {

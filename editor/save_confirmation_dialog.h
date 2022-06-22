@@ -52,8 +52,13 @@ public:
 
 	void confirm_resources(const List<ResourceFile>& resources);
 
+	List<ResourceFile> get_selected_resources();
+
 	SaveConfirmationDialog();
 	~SaveConfirmationDialog();
+
+private:
+	List<ResourceFile> _resources;
 };
 
 #endif

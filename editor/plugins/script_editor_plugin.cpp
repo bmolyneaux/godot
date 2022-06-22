@@ -2434,6 +2434,10 @@ bool ScriptEditor::edit(const RES &p_resource, int p_line, int p_col, bool p_gra
 }
 
 void ScriptEditor::save_current_script() {
+	// TODO(#4299): There's a bug where built-in script doesn't get saved if you Ctrl+S before the asterisk appears beside the script name
+	// Couldn't reproduce in 4.0alpha2, so this might be my fault. Should compare against HEAD~
+	// Can set a breakpoint and figure out what's happening
+	// ResourceFormatSaverTextInstance::save iterates saved_resources which doesn't include the built-in script
 	ScriptEditorBase *current = _get_current_editor();
 	if (!current || _test_script_times_on_disk()) {
 		return;
@@ -2512,6 +2516,9 @@ List<RES> ScriptEditor::get_unsaved_scripts()
 		RES edited_res = se->get_edited_resource();
 		
 		// TODO(#4299): Not sure if I need to check built-in scripts as well or if they will be handled by the scenes
+		// May be a good idea considering a built-in script modification doesn't propagate as a change to the scene.
+		// Better yet, I should fix that instead.
+		// If a built-in script is modified, let the scene know.
 		if (edited_res != nullptr && !edited_res->is_built_in()) {
 			unsaved_scripts.push_back(edited_res);
 		}
@@ -2549,6 +2556,8 @@ void ScriptEditor::save_all_scripts() {
 
 		RES edited_res = se->get_edited_resource();
 		if (edited_res.is_valid()) {
+			// TODO(#4299): save_current_script() doesn't apply_code() for Ref<Script>
+			// Why?
 			se->apply_code();
 		}
 
@@ -3791,7 +3800,7 @@ ScriptEditor::ScriptEditor() {
 	_update_recent_scripts();
 
 	file_menu->get_popup()->add_separator();
-	file_menu->get_popup()->add_shortcut(ED_SHORTCUT("script_editor/save", TTR("Save"), KeyModifierMask::ALT | KeyModifierMask::CMD | Key::S), FILE_SAVE);
+	file_menu->get_popup()->add_shortcut(ED_SHORTCUT("script_editor/save", TTR("Save"), KeyModifierMask::CMD | Key::S), FILE_SAVE);
 	file_menu->get_popup()->add_shortcut(ED_SHORTCUT("script_editor/save_as", TTR("Save As...")), FILE_SAVE_AS);
 	file_menu->get_popup()->add_shortcut(ED_SHORTCUT("script_editor/save_all", TTR("Save All"), KeyModifierMask::SHIFT | KeyModifierMask::ALT | Key::S), FILE_SAVE_ALL);
 	file_menu->get_popup()->add_separator();

@@ -1718,11 +1718,9 @@ void EditorNode::_save_scene(String p_file, int idx) {
 	}
 
 	scene->propagate_notification(NOTIFICATION_EDITOR_PRE_SAVE);
-
-	editor_data.apply_changes_in_editors();
+	
 	List<Ref<AnimatedValuesBackup>> anim_backups;
 	_reset_animation_players(scene, &anim_backups);
-	_save_default_environment();
 
 	_set_scene_metadata(p_file, idx);
 
@@ -1759,9 +1757,6 @@ void EditorNode::_save_scene(String p_file, int idx) {
 
 	// This needs to be emitted before saving external resources.
 	emit_signal(SNAME("scene_saved"), p_file);
-
-	_save_external_resources();
-	editor_data.save_editor_external_data();
 
 	for (Ref<AnimatedValuesBackup> &E : anim_backups) {
 		E->restore();
@@ -1844,6 +1839,19 @@ void EditorNode::_save_all_scenes() {
 		show_warning(TTR("Could not save one or more scenes!"), TTR("Save All Scenes"));
 	}
 	_save_default_environment();
+}
+
+void EditorNode::_save_files_and_close() {
+	List<SaveConfirmationDialog::ResourceFile> resources = save_confirmation2->get_selected_resources();
+
+	//save_scene_list();
+
+	//save resources
+
+	//save scripts seperately with modified version of ScriptEditor::save_current_script()
+	// Does editor ever save scripts separately?
+
+	_menu_option_confirm(current_option, false);
 }
 
 void EditorNode::_mark_unsaved_scenes() {
@@ -2538,12 +2546,48 @@ void EditorNode::_menu_option_confirm(int p_option, bool p_confirmed) {
 		case RUN_PROJECT_MANAGER:
 		case RELOAD_CURRENT_PROJECT: {
 			// TODO(#4299): Remove "interface/editor/save_each_scene_on_quit"
-			// TODO(#4299): Special case not previously saved scenes
-			// TODO(#4299): Figure out if former !p_confirmed check is necessary here
 
+			// TODO(#4299): Also for new unsaved scenes. Currently this only lists previously saved scenes
+
+			// TODO(#4299): Can use this for the save confirmation dialog to change scenes
+			//_scene_tab_changed(tab_closing);
+			// For scripts: _editor_select(EDITOR_SCRIPT);
+			// Or perhaps: if (textfile_extensions.has(p_resource.get_extension())) res = ScriptEditor::get_singleton()->open_file(p_resource);
+			//ScriptEditor::get_singleton()->open_file(unsaved_scripts[0]->get_path());
+			//_editor_select(EDITOR_SCRIPT);
+
+			if (!p_confirmed) {
+				// First handle the pathless scenes
+				int i = _next_unsaved_scene(true, 0);
+				if (i != -1) {
+					tab_closing = i;
+					_scene_tab_changed(tab_closing);
+
+					Node *scene_root = editor_data.get_edited_scene_root(tab_closing);
+					if (scene_root) {
+						String scene_filename = scene_root->get_scene_file_path();
+						if (p_option == RELOAD_CURRENT_PROJECT) {
+							save_confirmation->get_ok_button()->set_text(TTR("Save & Reload"));
+							save_confirmation->set_text(vformat(TTR("Save this scene before reloading?")));
+						} else {
+							save_confirmation->get_ok_button()->set_text(TTR("Save & Quit"));
+							save_confirmation->set_text(vformat(TTR("Save this scene before closing?")));
+						}
+						save_confirmation->popup_centered();
+						break;
+					}
+				}
+			}
+			
+			/*[[fallthrough]];
+		}
+		case FILE_CLOSE_ALL_AND_QUIT:
+		case FILE_CLOSE_ALL_AND_RUN_PROJECT_MANAGER:
+		case FILE_CLOSE_ALL_AND_RELOAD_CURRENT_PROJECT: {*/
 			// TODO(#4299): Check scripts and resources for unsaved changes in addition to scenes
 			bool unsaved_changes = _next_unsaved_scene(false) != -1;
 			if (!unsaved_changes) {
+				// All changes have been saved
 				switch(current_option) {
 					case FILE_QUIT: {
 						_menu_option_confirm(RUN_STOP, true);
@@ -2568,50 +2612,14 @@ void EditorNode::_menu_option_confirm(int p_option, bool p_confirmed) {
 					} break;
 				}
 				break;
-			} else {
-				// TODO(#4299): Also for new unsaved scenes. Currently this only lists previously saved scenes
+			}
+				
+			if (!p_confirmed) {
 
-				// TODO(#4299): Can use this for the save confirmation dialog to change scenes
-				//_scene_tab_changed(tab_closing);
-				// For scripts: _editor_select(EDITOR_SCRIPT);
-				// Or perhaps: if (textfile_extensions.has(p_resource.get_extension())) res = ScriptEditor::get_singleton()->open_file(p_resource);
-				//ScriptEditor::get_singleton()->open_file(unsaved_scripts[0]->get_path());
-				//_editor_select(EDITOR_SCRIPT);
-
-				// First handle the pathless scenes
-				int i = _next_unsaved_scene(true, 0);
-				// TODO(#4299): Make sure that tab_closing is reset
-				if (i == tab_closing) {
-					// TODO(#4299): Need FILE_SAVE_SCENE to get back to this flow
-					// This gets stuck in the decision to save
-					// How does it trigger saving normally? Should aim to do it that way instead
-					// The current system relies on fallthrough to FILE_SAVE_AS_SCENE
-					_menu_option_confirm(FILE_SAVE_SCENE, false);
-					break;
-				}
-				if (i != -1) {
-					tab_closing = i;
-					_scene_tab_changed(tab_closing);
-
-					Node *scene_root = editor_data.get_edited_scene_root(tab_closing);
-					if (scene_root) {
-						String scene_filename = scene_root->get_scene_file_path();
-						if (p_option == RELOAD_CURRENT_PROJECT) {
-							save_confirmation->get_ok_button()->set_text(TTR("Save & Reload"));
-							save_confirmation->set_text(vformat(TTR("Save this scene before reloading?")));
-						} else {
-							save_confirmation->get_ok_button()->set_text(TTR("Save & Quit"));
-							save_confirmation->set_text(vformat(TTR("Save this scene before closing?")));
-						}
-						save_confirmation->popup_centered();
-						break;
-					}
-				}
-
-				// Next bundle up all other changes
+				// Handle the previously saved files
 				List<SaveConfirmationDialog::ResourceFile> resources;
 					
-				i = _next_unsaved_scene(false, 0);
+				int i = _next_unsaved_scene(false, 0);
 				while (i != -1) {
 					SaveConfirmationDialog::ResourceFile rf;
 					rf.file_path = editor_data.get_edited_scene_root(i)->get_scene_file_path();
@@ -2645,15 +2653,11 @@ void EditorNode::_menu_option_confirm(int p_option, bool p_confirmed) {
 				}
 
 				save_confirmation2->confirm_resources(resources);
-			}
 
-			DisplayServer::get_singleton()->window_request_attention();
-			break;
+				DisplayServer::get_singleton()->window_request_attention();
 
-			/*if (_next_unsaved_scene(false) != -1) {
-				_save_all_scenes();
+				break;
 			}
-			_discard_changes();*/
 			
 			[[fallthrough]];
 		}
@@ -2686,24 +2690,6 @@ void EditorNode::_menu_option_confirm(int p_option, bool p_confirmed) {
 			Node *scene = editor_data.get_edited_scene_root(scene_idx);
 
 			if (!scene) {
-				if (p_option == FILE_SAVE_SCENE) {
-					// Pressing Ctrl + S saves the current script if a scene is currently open, but it won't if the scene has no root node.
-					// Work around this by explicitly saving the script in this case (similar to pressing Ctrl + Alt + S).
-					ScriptEditor::get_singleton()->save_current_script();
-				}
-
-				const int saved = _save_external_resources();
-				if (saved > 0) {
-					show_accept(
-							vformat(TTR("The current scene has no root node, but %d modified external resource(s) were saved anyway."), saved),
-							TTR("OK"));
-				} else if (p_option == FILE_SAVE_AS_SCENE) {
-					// Don't show this dialog when pressing Ctrl + S to avoid interfering with script saving.
-					show_accept(
-							TTR("A root node is required to save the scene. You can add a root node using the Scene tree dock."),
-							TTR("OK"));
-				}
-
 				break;
 			}
 
@@ -6914,9 +6900,8 @@ EditorNode::EditorNode() {
 
 	save_confirmation2 = memnew(SaveConfirmationDialog);
 	gui_base->add_child(save_confirmation2);
-	// TODO(#4299): Connect cancel, save, don't save buttons
 	save_confirmation2->connect("resource_file_activated", callable_mp(this, &EditorNode::_resource_file_activated));
-	//save_confirmation2->connect("save_and_close", callable_mp(this, &EditorNode::_save_files_and_close));
+	save_confirmation2->connect("save_and_close", callable_mp(this, &EditorNode::_save_files_and_close));
 	save_confirmation2->connect("dont_save", callable_mp(this, &EditorNode::_discard_changes));
 
 	custom_build_manage_templates = memnew(ConfirmationDialog);
